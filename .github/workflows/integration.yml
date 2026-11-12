@@ -8,7 +8,45 @@ permissions:
   contents: read
 
 jobs:
+  build-electrs:
+    runs-on: ubuntu-22.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: romanz/electrs
+          ref: d0aa1c30b6f5285f01d89ff6c85e8a6046b226ee
+          persist-credentials: false
+
+      - name: Install build dependencies
+        run: sudo apt-get update && sudo apt-get install -y build-essential libclang-dev
+
+      - name: Build and package Electrs
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = d0aa1c30b6f5285f01d89ff6c85e8a6046b226ee
+          rustup toolchain install 1.88.0 --profile minimal --component cargo
+          cargo +1.88.0 build --release --locked
+          target/release/electrs --version
+          name=electrs-v0.12.1-x86_64-linux-gnu
+          mkdir "$name"
+          cp target/release/electrs LICENSE "$name/"
+          tar --sort=name --mtime="@$(git show -s --format=%ct HEAD)" \
+            --owner=0 --group=0 --numeric-owner -cf - "$name" | gzip -n > "$name.tar.gz"
+          sha256sum "$name.tar.gz" > "$name.tar.gz.sha256"
+          printf '::notice title=Electrs archive SHA-256::%s\n' "$(cat "$name.tar.gz.sha256")"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: electrs-v0.12.1-linux-x86_64
+          path: |
+            electrs-v0.12.1-x86_64-linux-gnu.tar.gz
+            electrs-v0.12.1-x86_64-linux-gnu.tar.gz.sha256
+          if-no-files-found: error
+          retention-days: 30
+
   functional-tests:
+    needs: build-electrs
     runs-on: ubuntu-24.04
     timeout-minutes: 90
 
@@ -20,16 +58,6 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - USE_TAPROOT: 0
-            BITCOIN_BACKEND_TYPE: 'bitcoind'
-            USE_MIN_BITCOIN_VERSION: 'TRUE'
-          - USE_TAPROOT: 0
-            BITCOIN_BACKEND_TYPE: 'bitcoind'
-          - USE_TAPROOT: 1
-            BITCOIN_BACKEND_TYPE: 'bitcoind'
-          - USE_TAPROOT: 0
-            BITCOIN_BACKEND_TYPE: 'electrs'
-            USE_MIN_BITCOIN_VERSION: 'TRUE'
           - USE_TAPROOT: 0
             BITCOIN_BACKEND_TYPE: 'electrs'
           - USE_TAPROOT: 1
@@ -49,6 +77,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: electrs-v0.12.1-linux-x86_64
 
       - uses: actions/setup-python@v5
         with:
@@ -138,24 +170,13 @@ jobs:
             export BITCOIND_PATH=bitcoin-32.1/bin/bitcoind
           fi
 
-          echo "BITCOIN_BACKEND_TYPE = $BITCOIN_BACKEND_TYPE"
-
-          if [ "$BITCOIN_BACKEND_TYPE" = "electrs" ]; then
-            if [ "$USE_MIN_BITCOIN_VERSION" = "TRUE" ]; then
-              curl -OL https://github.com/jp1ac4/electrsd/releases/download/electrs-v0.10.6-ubuntu-20.04/electrs_linux_v0.10.6.zip
-              echo "34934bedbc4003867353f23c7983d4aa2d901dfccfd0bd74167f9fd305c56f7b electrs_linux_v0.10.6.zip" | sha256sum -c
-              unzip electrs_linux_v0.10.6.zip
-              chmod 754 electrs
-              export ELECTRS_PATH=$PWD/electrs
-            else
-              # Electrs 0.12.1 supports Core's getmempoolentry without bip125-replaceable.
-              sudo apt-get install -y libclang-dev
-              cargo install --locked --git https://github.com/romanz/electrs.git \
-                --rev d0aa1c30b6f5285f01d89ff6c85e8a6046b226ee --root "$RUNNER_TEMP/liana-electrs"
-              export ELECTRS_PATH="$RUNNER_TEMP/liana-electrs/bin/electrs"
-              export ELECTRS_USE_REST=1
-            fi
-          fi
+          name=electrs-v0.12.1-x86_64-linux-gnu
+          sha256sum -c "$name.tar.gz.sha256"
+          printf '::notice title=Tested Electrs archive SHA-256::%s\n' "$(cat "$name.tar.gz.sha256")"
+          tar -xzf "$name.tar.gz"
+          export ELECTRS_PATH="$PWD/$name/electrs"
+          export ELECTRS_USE_REST=1
+          "$ELECTRS_PATH" --version
 
           curl -LO https://github.com/wizardsardine/liana/releases/download/0.3.1/liana-0.3.1-x86_64-linux-gnu.tar.gz
           echo "70c8595554b6f78ccc7b66ef5f5ebc5bac03a7b1ce28afe8a076f69adf59c583 liana-0.3.1-x86_64-linux-gnu.tar.gz" | sha256sum -c
