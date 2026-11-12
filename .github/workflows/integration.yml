@@ -2,11 +2,14 @@ name: Functional Tests
 
 on:
   push:
-  pull_request:
+    branches: [ci/bitcoin-core-32.1]
+
+permissions:
+  contents: read
 
 jobs:
   functional-tests:
-    runs-on: self-hosted
+    runs-on: ubuntu-24.04
     timeout-minutes: 90
 
     # NOTE: uncomment this to enable docker
@@ -14,6 +17,7 @@ jobs:
     #   image: rust:1-bookworm
 
     strategy:
+      fail-fast: false
       matrix:
         include:
           - USE_TAPROOT: 0
@@ -42,6 +46,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
 
       # NOTE: uncomment this if docker enabled
       # - name: Install system dependencies
@@ -98,9 +111,9 @@ jobs:
       - name: Build lianad and taproot_signer
         run: |
           cd lianad
-          cargo build --release
+          cargo build --locked --release
           cd ../tests/tools/taproot_signer
-          cargo build --release
+          cargo build --locked --release
 
       - name: Prepare and run functional tests
         run: |
@@ -138,4 +151,4 @@ jobs:
           rm -rf ~/.cargo/registry/index
 
           # Run the functional tests
-          LIANAD_PATH=$PWD/target/release/lianad .venv/bin/pytest tests/ -vvv -n 8
+          LIANAD_PATH=$PWD/target/release/lianad .venv/bin/pytest tests/ -vv -n 4 -ra
