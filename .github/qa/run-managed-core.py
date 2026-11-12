@@ -99,6 +99,8 @@ def run_test(previous, current, directory):
 
 
 def main():
+    if len(sys.argv) not in (2, 4):
+        raise SystemExit("Usage: run-managed-core.py FLAVOR [OLD_ARCHIVE NEW_ARCHIVE]")
     flavor = sys.argv[1]
     previous_hash, current_hash = CHECKSUMS[flavor]
     with tempfile.TemporaryDirectory(prefix="managed-core-qa-") as temporary:

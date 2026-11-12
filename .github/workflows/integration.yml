@@ -36,6 +36,7 @@ jobs:
             BITCOIN_BACKEND_TYPE: 'electrs'
 
     env:
+      RUSTUP_TOOLCHAIN: 1.88.0
       EXECUTOR_WORKERS: 3
       VERBOSE: 0
       LOG_LEVEL: debug
@@ -55,6 +56,11 @@ jobs:
 
       - name: Install system dependencies
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - name: Install Rust
+        run: |
+          rustup toolchain install 1.88.0 --profile minimal --component cargo
+          cargo --version
 
       # NOTE: uncomment this if docker enabled
       # - name: Install system dependencies

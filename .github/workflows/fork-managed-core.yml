@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install Rust
-        run: rustup toolchain install 1.88.0 --profile minimal
+        run: rustup toolchain install 1.88.0 --profile minimal --component cargo
       - name: Install Linux build dependencies
         if: runner.os == 'Linux'
         run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config libfontconfig1-dev

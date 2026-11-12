@@ -8,6 +8,7 @@ struct ManagedNode {
     node: Option<Bitcoind>,
     addr: SocketAddr,
     debug_log: PathBuf,
+    log_offset: usize,
 }
 
 impl ManagedNode {
@@ -18,8 +19,9 @@ impl ManagedNode {
         node.stop();
         for _ in 0..300 {
             if TcpStream::connect(self.addr).is_err()
-                && std::fs::read_to_string(&self.debug_log).is_ok_and(|log| {
-                    log.contains("Shutdown done") || log.contains("Shutdown: done")
+                && std::fs::read(&self.debug_log).is_ok_and(|log| {
+                    let latest = String::from_utf8_lossy(log.get(self.log_offset..).unwrap_or(&[]));
+                    latest.contains("Shutdown done") || latest.contains("Shutdown: done")
                 })
             {
                 return;
@@ -63,7 +65,10 @@ fn qa_upgrades_a_real_managed_regtest_node() {
     let listener = TcpListener::bind(("127.0.0.1", 0)).unwrap();
     let addr = listener.local_addr().unwrap();
     let conf = format!(
-        "listen=0\nlistenonion=0\nonion=0\ndnsseed=0\nfixedseeds=0\n+         [regtest]\nrpcbind=127.0.0.1\nrpcport={}\n",
+        concat!(
+            "listen=0\nlistenonion=0\nonion=0\ndnsseed=0\nfixedseeds=0\n",
+            "[regtest]\nrpcport={}\n"
+        ),
         addr.port()
     );
     std::fs::write(internal_bitcoind_config_path(&datadir), conf).unwrap();
@@ -89,10 +94,16 @@ fn qa_upgrades_a_real_managed_regtest_node() {
         serde_json::from_slice::<serde_json::Value>(&response.stdout).unwrap()
     };
     let debug_log = internal_bitcoind_debug_log_path(&directory, Network::Regtest);
-    let start = || ManagedNode {
-        node: Some(Bitcoind::maybe_start(Network::Regtest, config.clone(), &directory).unwrap()),
-        addr,
-        debug_log: debug_log.clone(),
+    let start = || {
+        let log_offset = std::fs::metadata(&debug_log).map_or(0, |info| info.len() as usize);
+        ManagedNode {
+            node: Some(
+                Bitcoind::maybe_start(Network::Regtest, config.clone(), &directory).unwrap(),
+            ),
+            addr,
+            debug_log: debug_log.clone(),
+            log_offset,
+        }
     };
     let mut node = start();
     assert_eq!(call(&["getnetworkinfo"])["version"], 310100);
@@ -104,7 +115,6 @@ fn qa_upgrades_a_real_managed_regtest_node() {
     let mined = call(&["generatetoaddress", "1", &address]);
     assert_eq!(mined.as_array().unwrap().len(), 1);
     node.stop();
-    std::fs::rename(&debug_log, debug_log.with_extension("31.1.log")).unwrap();
 
     install_bitcoind(&destination, &bytes).unwrap();
     assert!(internal_bitcoind_exe_path(&directory, VERSION).is_file());
