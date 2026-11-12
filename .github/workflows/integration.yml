@@ -34,12 +34,6 @@ jobs:
             BITCOIN_BACKEND_TYPE: 'electrs'
           - USE_TAPROOT: 1
             BITCOIN_BACKEND_TYPE: 'electrs'
-          - USE_TAPROOT: 1
-            BITCOIN_BACKEND_TYPE: 'electrs'
-            DIAGNOSTIC_CORE: '31.1'
-          - USE_TAPROOT: 1
-            BITCOIN_BACKEND_TYPE: 'electrs'
-            DIAGNOSTIC_CORE: '32.1'
 
     env:
       RUSTUP_TOOLCHAIN: 1.88.0
@@ -50,7 +44,6 @@ jobs:
       USE_MIN_BITCOIN_VERSION: ${{ matrix.USE_MIN_BITCOIN_VERSION }}
       USE_TAPROOT: ${{ matrix.USE_TAPROOT }}
       BITCOIN_BACKEND_TYPE: ${{ matrix.BITCOIN_BACKEND_TYPE }}
-      DIAGNOSTIC_CORE: ${{ matrix.DIAGNOSTIC_CORE }}
 
     steps:
       - uses: actions/checkout@v4
@@ -138,11 +131,6 @@ jobs:
             tar -xzf bitcoin-24.0.1-x86_64-linux-gnu.tar.gz
             export BITCOIND_PATH=bitcoin-24.0.1/bin/bitcoind
             export IS_NOT_BITCOIND_24=0
-          elif [ "$DIAGNOSTIC_CORE" = "31.1" ]; then
-            curl -fSO https://bitcoincore.org/bin/bitcoin-core-31.1/bitcoin-31.1-x86_64-linux-gnu.tar.gz
-            echo "b80d9c3e04da78fb6f0569685673418cf686fadba9042d926d13fb87ff503f9e bitcoin-31.1-x86_64-linux-gnu.tar.gz" | sha256sum -c
-            tar -xzf bitcoin-31.1-x86_64-linux-gnu.tar.gz
-            export BITCOIND_PATH=bitcoin-31.1/bin/bitcoind
           else
             curl -O https://bitcoincore.org/bin/bitcoin-core-32.1/bitcoin-32.1-x86_64-linux-gnu.tar.gz
             echo "61545c17c3120fb7412f896d248b11993af04ec8817aad3649c55b2afb044963 bitcoin-32.1-x86_64-linux-gnu.tar.gz" | sha256sum -c
@@ -153,11 +141,20 @@ jobs:
           echo "BITCOIN_BACKEND_TYPE = $BITCOIN_BACKEND_TYPE"
 
           if [ "$BITCOIN_BACKEND_TYPE" = "electrs" ]; then
-            curl -OL https://github.com/jp1ac4/electrsd/releases/download/electrs-v0.10.6-ubuntu-20.04/electrs_linux_v0.10.6.zip
-            echo "34934bedbc4003867353f23c7983d4aa2d901dfccfd0bd74167f9fd305c56f7b electrs_linux_v0.10.6.zip" | sha256sum -c
-            unzip electrs_linux_v0.10.6.zip
-            chmod 754 electrs
-            export ELECTRS_PATH=$PWD/electrs
+            if [ "$USE_MIN_BITCOIN_VERSION" = "TRUE" ]; then
+              curl -OL https://github.com/jp1ac4/electrsd/releases/download/electrs-v0.10.6-ubuntu-20.04/electrs_linux_v0.10.6.zip
+              echo "34934bedbc4003867353f23c7983d4aa2d901dfccfd0bd74167f9fd305c56f7b electrs_linux_v0.10.6.zip" | sha256sum -c
+              unzip electrs_linux_v0.10.6.zip
+              chmod 754 electrs
+              export ELECTRS_PATH=$PWD/electrs
+            else
+              # Electrs 0.12.1 supports Core's getmempoolentry without bip125-replaceable.
+              sudo apt-get install -y libclang-dev
+              cargo install --locked --git https://github.com/romanz/electrs.git \
+                --rev d0aa1c30b6f5285f01d89ff6c85e8a6046b226ee --root "$RUNNER_TEMP/liana-electrs"
+              export ELECTRS_PATH="$RUNNER_TEMP/liana-electrs/bin/electrs"
+              export ELECTRS_USE_REST=1
+            fi
           fi
 
           curl -LO https://github.com/wizardsardine/liana/releases/download/0.3.1/liana-0.3.1-x86_64-linux-gnu.tar.gz
@@ -169,16 +166,4 @@ jobs:
           rm -rf ~/.cargo/registry/index
 
           # Run the functional tests
-          export LIANAD_PATH=$PWD/target/release/lianad
-          if [ -n "$DIAGNOSTIC_CORE" ]; then
-            export TEST_DIR="$(mktemp -d /tmp/liana-electrs.XXXXXX)"
-            status=0
-            TIMEOUT=25 .venv/bin/pytest -vv --tb=short tests/test_rpc.py::test_jsonrpc_server || status=$?
-            if [ "$status" != 0 ]; then
-              find "$TEST_DIR" -type f -path '*/electrs/log' -print -exec tail -n 110 '{}' \;
-              find "$TEST_DIR" -type f -path '*/lianad/log' -print -exec tail -n 45 '{}' \;
-              find "$TEST_DIR" -type f -path '*/bitcoind/log' -print -exec sh -c 'grep -Ei "mempool|error|warn" "$1" | tail -n 65' _ '{}' \;
-            fi
-            exit "$status"
-          fi
-          .venv/bin/pytest tests/ -vv -n 4 -ra
+          LIANAD_PATH=$PWD/target/release/lianad .venv/bin/pytest tests/ -vv -n 4 -ra

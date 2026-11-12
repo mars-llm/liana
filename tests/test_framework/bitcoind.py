@@ -81,6 +81,8 @@ class Bitcoind(BitcoinBackend):
             # h/t pythcoiner :)
             "peertimeout": 2 * 24 * 60 * 60,  # 2 days
         }
+        if os.getenv("ELECTRS_USE_REST") == "1":
+            bitcoind_conf["rest"] = 1
         self.conf_file = os.path.join(bitcoin_dir, "bitcoin.conf")
         with open(self.conf_file, "w") as f:
             f.write("chain=regtest\n")
